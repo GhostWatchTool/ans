@@ -1,0 +1,36 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Background -->
+    <path
+        android:fillColor="#1D1D1D"
+        android:pathData="M0,0 L24,0 L24,24 L0,24 Z" />
+    <!-- Transmitter dot -->
+    <path
+        android:fillColor="#C4C4C4"
+        android:pathData="M12,12 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 Z" />
+    <!-- Inner broadcast arcs -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#C4C4C4"
+        android:strokeWidth="1.6"
+        android:pathData="M15.5,9 A5,5 0 0 1 15.5,15" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#C4C4C4"
+        android:strokeWidth="1.6"
+        android:pathData="M8.5,9 A5,5 0 0 0 8.5,15" />
+    <!-- Outer broadcast arcs -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#7E7E7E"
+        android:strokeWidth="1.4"
+        android:pathData="M18.5,6 A9,9 0 0 1 18.5,18" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#7E7E7E"
+        android:strokeWidth="1.4"
+        android:pathData="M5.5,6 A9,9 0 0 0 5.5,18" />
+</vector>

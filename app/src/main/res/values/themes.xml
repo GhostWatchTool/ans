@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light variant (default). Android selects values-night/ in dark mode.
+         All UI is drawn by Compose's MaterialTheme; this controls only the
+         window background and system-bar appearance. -->
+    <style name="Theme.NumberStation" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+        <!-- Dark status-bar icons over the light background. -->
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

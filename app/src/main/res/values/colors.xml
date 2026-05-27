@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match the Compose surfaces in Theme.kt so there is no colour step
+         between the launch window and the rendered UI. -->
+    <color name="window_background">#E2E2E2</color>
+</resources>

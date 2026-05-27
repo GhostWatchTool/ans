@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark variant, selected automatically when the system is in dark mode. -->
+    <style name="Theme.NumberStation" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+        <!-- Light status-bar icons over the dark background. -->
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
