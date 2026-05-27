@@ -1,6 +1,7 @@
 package dev.wntrmute.ans
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -37,8 +38,9 @@ class NumberStationPlayer(context: Context) {
     private var sessionId = 0
 
     private var groups: List<String> = emptyList()
-    private var passesRemaining: Int? = null // null == loop forever
+    private var plan = RepeatPlan(repeat = false, loopForever = false, plays = 1)
     private var pendingPlay: (() -> Unit)? = null
+    private var audioAttributes: AudioAttributes? = null
 
     private val progressListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) = Unit
@@ -67,6 +69,7 @@ class NumberStationPlayer(context: Context) {
         ready = true
         applyBritishVoice()
         tts.setSpeechRate(SPEECH_RATE)
+        audioAttributes?.let { tts.setAudioAttributes(it) }
         tts.setOnUtteranceProgressListener(progressListener)
         pendingPlay?.let { main.post(it) }
         pendingPlay = null
@@ -75,6 +78,12 @@ class NumberStationPlayer(context: Context) {
     private val tts: TextToSpeech = TextToSpeech(context.applicationContext, initListener)
 
     val isPlaying: Boolean get() = playing
+
+    /** Route synthesized speech through the given audio attributes (media stream). */
+    fun setAudioAttributes(attributes: AudioAttributes) {
+        audioAttributes = attributes
+        if (ready) tts.setAudioAttributes(attributes)
+    }
 
     /**
      * Begin playback of [groups]. When [repeat] is false the message is read
@@ -85,11 +94,7 @@ class NumberStationPlayer(context: Context) {
     fun start(groups: List<String>, repeat: Boolean, loopForever: Boolean, plays: Int) {
         if (groups.isEmpty()) return
         this.groups = groups
-        passesRemaining = when {
-            !repeat -> 1
-            loopForever -> null
-            else -> plays.coerceAtLeast(1)
-        }
+        plan = RepeatPlan(repeat, loopForever, plays)
         val run = {
             sessionId++
             setPlaying(true)
@@ -116,15 +121,7 @@ class NumberStationPlayer(context: Context) {
 
     private fun onPassComplete() {
         if (!playing) return
-        passesRemaining?.let { remaining ->
-            val next = remaining - 1
-            passesRemaining = next
-            if (next <= 0) {
-                setPlaying(false)
-                return
-            }
-        }
-        enqueuePass()
+        if (plan.completePass()) enqueuePass() else setPlaying(false)
     }
 
     private fun enqueuePass() {
