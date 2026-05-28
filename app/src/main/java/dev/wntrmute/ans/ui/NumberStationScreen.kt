@@ -46,13 +46,23 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.wntrmute.ans.NumberFormatter
 import dev.wntrmute.ans.NumberStationViewModel
 
+// Pre-seeded sample message — useful for testing without retyping. Survives
+// the rememberSaveable restore until the user edits the field; force-stopping
+// or reinstalling brings it back.
+private const val DEFAULT_MESSAGE = "10814 52441 84992 0837"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NumberStationScreen(viewModel: NumberStationViewModel = viewModel()) {
     // The field lives here (not in the ViewModel) so its caret survives
     // recomposition; playback uses a snapshot taken when Play is pressed.
     var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(""))
+        mutableStateOf(
+            TextFieldValue(
+                text = DEFAULT_MESSAGE,
+                selection = TextRange(DEFAULT_MESSAGE.length),
+            )
+        )
     }
     val groups = remember(field.text) { NumberFormatter.groups(field.text) }
     val digitCount = remember(field.text) { NumberFormatter.digitsOnly(field.text).length }
