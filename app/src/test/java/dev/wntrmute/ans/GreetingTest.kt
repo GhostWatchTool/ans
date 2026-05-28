@@ -7,27 +7,34 @@ class GreetingTest {
 
     @Test
     fun morningCovers5To11() {
-        assertEquals("Good morning", greetingForHour(5))
-        assertEquals("Good morning", greetingForHour(8))
-        assertEquals("Good morning", greetingForHour(11))
+        assertEquals(Greeting.Morning, greetingForHour(5))
+        assertEquals(Greeting.Morning, greetingForHour(8))
+        assertEquals(Greeting.Morning, greetingForHour(11))
     }
 
     @Test
     fun afternoonCovers12To16() {
-        assertEquals("Good afternoon", greetingForHour(12))
-        assertEquals("Good afternoon", greetingForHour(16))
+        assertEquals(Greeting.Afternoon, greetingForHour(12))
+        assertEquals(Greeting.Afternoon, greetingForHour(16))
     }
 
     @Test
     fun eveningCovers17To20() {
-        assertEquals("Good evening", greetingForHour(17))
-        assertEquals("Good evening", greetingForHour(20))
+        assertEquals(Greeting.Evening, greetingForHour(17))
+        assertEquals(Greeting.Evening, greetingForHour(20))
     }
 
     @Test
     fun nightCoversTheLateAndEarlyHours() {
-        assertEquals("Good night", greetingForHour(21))
-        assertEquals("Good night", greetingForHour(0))
-        assertEquals("Good night", greetingForHour(4))
+        assertEquals(Greeting.Night, greetingForHour(21))
+        assertEquals(Greeting.Night, greetingForHour(0))
+        assertEquals(Greeting.Night, greetingForHour(4))
+    }
+
+    @Test
+    fun phraseAndResourceNamesAreInSync() {
+        assertEquals("Good morning", Greeting.Morning.phrase)
+        assertEquals("good_morning", Greeting.Morning.rawName)
+        assertEquals("Good bye for now"[0], 'G') // sanity that we kept the goodbye phrase form
     }
 }

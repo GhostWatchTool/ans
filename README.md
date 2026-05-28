@@ -1,4 +1,4 @@
-# Number Station
+  # Number Station
 
 An Android app that reads out groups of five digits using the device's built-in
 text-to-speech engine — a software numbers station, designed to be fed into a
@@ -9,10 +9,11 @@ text-to-speech engine — a software numbers station, designed to be fed into a
 - **Five-digit grouping.** Type digits and the message field auto-formats them
   into space-separated groups of five (`12345 67890 …`). Non-digit input is
   ignored; the caret stays put as you type.
-- **Play / Stop.** One button starts and stops playback. Digits are spoken one
-  at a time, with a short pause between groups, in a British English (en-GB)
-  voice — the engine's en-GB default, which Google ships as female. (Android's
-  TTS API exposes no gender field, so this is locale-based, not a hard request.)
+- **Play / Stop.** One button starts and stops playback. Digits are read from
+  pre-recorded en-GB audio clips bundled in the APK (~124 KB of Opus). Default
+  voice is **Fiona** (macOS-rendered, Enhanced quality); **Tessa** is also
+  shipped as a hidden alt for a future settings toggle. No system text-to-speech
+  engine is required, so the app works on de-Googled Android (e.g. GrapheneOS).
 - **Repeat.** A toggle reveals two modes: *loop until stopped*, or *repeat a
   fixed number of times* (with a `−` / `+` stepper).
 - **Background-robust playback.** Reading runs in a foreground `mediaPlayback`
@@ -104,7 +105,8 @@ git push origin v1.2.3
 | `RepeatPlan.kt` | Pure repeat / pass-count accounting (unit-tested) |
 | `Greeting.kt` | Time-of-day greeting selection (unit-tested) |
 | `TonePlayer.kt` | Sine-wave tone generation + playback via `AudioTrack` |
-| `NumberStationPlayer.kt` | Wraps `TextToSpeech`; sequences greeting / digits / tones / signoff |
+| `NumberStationPlayer.kt` | Step sequencer for greeting / digits / tones / signoff; plays clips via `MediaPlayer`, tones via `TonePlayer` |
+| `res/raw/*.ogg` | Pre-recorded voice clips — Fiona by default, `tessa_*.ogg` as a hidden alt |
 | `NumberStationService.kt` | Foreground `mediaPlayback` service; owns the player, audio focus, wake lock, notification |
 | `PlaybackState.kt` | Shared `StateFlow` bridging service ↔ ViewModel |
 | `NumberStationViewModel.kt` | Transport + repeat-settings state; sends play/stop intents to the service |

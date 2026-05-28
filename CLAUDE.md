@@ -25,11 +25,16 @@ behaviour" in `README.md`.
   the ongoing notification. State flows back through `PlaybackState`
   (`StateFlow<Boolean>`), so playback survives Activity destruction
   (rotation, backgrounding) and screen-off.
-- **Audio sequencing** — `NumberStationPlayer` queues utterances on the TTS
-  engine and triggers `TonePlayer` (a parallel `AudioTrack`) from
-  utterance-onStart callbacks, so sine tones play in sequence with voice
-  utterances without modifying the speech audio. Tones and TTS mix at the
-  system audio mixer.
+- **Audio sequencing** — `NumberStationPlayer` builds a flat list of `Step`s
+  (tone / silence / clip) per pass and runs them one at a time on the main
+  thread. Tones advance after their fixed duration via `Handler.postDelayed`;
+  audio clips advance on `MediaPlayer.OnCompletionListener`. A session-id
+  guard discards callbacks from a flushed queue after `stop()`.
+- **Voices** — pre-recorded `.ogg` files in `res/raw/` (digits 0–9, four
+  time-of-day greetings, signoff). Two voice sets ship: `Fiona` (default,
+  no prefix) and `Tessa` (`tessa_*` prefix, hidden). `NumberStationPlayer.voice`
+  picks one; resolved at clip time via `Resources.getIdentifier`. No system
+  TTS engine is required, so the app runs on GrapheneOS.
 - **Pure logic** — `NumberFormatter`, `RepeatPlan`, and `Greeting` have no
   Android imports and are JVM-unit-tested.
 
@@ -44,15 +49,17 @@ verification on a real radio — unit tests don't catch VOX-driven regressions.
 
 ## Key conventions
 
-- **British (en-GB) voice by default.** Android's TTS API has no gender field,
-  so we set the locale and rely on the en-GB default being female (which
-  Google ships).
+- **British (en-GB) voice by default** — Fiona, rendered by macOS `say` at
+  `-r 165`, encoded to ~32 kbps mono Opus. Re-generate with
+  `say -v <voice>` → `ffmpeg -ar 24000 -ac 1 -c:a libopus -b:a 32k` if you
+  want a different voice. New voices go in `res/raw/` with a unique prefix
+  and a corresponding `NumberStationPlayer.Voice` entry.
 - **System theme follows the device.** Compose colors switch via
   `isSystemInDarkTheme()`; `values/themes.xml` + `values-night/themes.xml`
   handle window chrome and status-bar icon colour per mode.
-- **Foreground service is required.** TTS in the background without a
-  `mediaPlayback` foreground service gets reaped when the screen sleeps. Do
-  not move playback back into the ViewModel.
+- **Foreground service is required.** Audio playback in the background
+  without a `mediaPlayback` foreground service gets reaped when the screen
+  sleeps. Do not move playback back into the ViewModel.
 
 ## Module path
 
@@ -71,7 +78,10 @@ matches the tag. Local builds default to `1.0.0-dev` if the property isn't set.
 
 ## Not here yet
 
-- No settings UI for tuning lead-in / preamble / signoff text (the greeting
-  and goodbye are hardcoded constants in `NumberStationPlayer.kt` — a text-box
-  hook is expected later).
+- No settings UI for the voice selection — `Tessa` clips ship in the APK
+  but `NumberStationPlayer.voice` is hardcoded to `Fiona`. Wire a setting,
+  flip the property.
+- No settings UI for tuning the lead-in / preamble / signoff phrases (the
+  greeting and goodbye are fixed bundled clips today; making them user-typed
+  text would mean putting TTS back, or shipping more clip variants).
 - No in-repo signing config (matches kbc's stance — local signing only).
