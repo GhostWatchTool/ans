@@ -61,6 +61,41 @@ the build at the SDK and is git-ignored.
 
 The APK lands in `app/build/outputs/apk/debug/`.
 
+## Releases
+
+Pushing a `v*` tag (e.g. `v1.0.0`) triggers `.github/workflows/release.yml`,
+which builds the **unsigned** release APK on a GitHub-hosted runner and
+attaches it to the GitHub release as `ans-<version>-release-unsigned.apk`. The
+workflow passes `-PansVersion=<tag without v>` to Gradle so the APK's
+`versionName` matches the tag.
+
+Signing is deliberately kept off CI — the keystore stays on the maintainer's
+machine (same policy as the `kbc` repo). To install the artifact, sign it
+locally first:
+
+```sh
+# zipalign first (paranoid; assembleRelease already aligns, but apksigner needs
+# it before signing v2+):
+$ANDROID_HOME/build-tools/35.0.0/zipalign -v -p 4 \
+    ans-1.0.0-release-unsigned.apk ans-1.0.0-aligned.apk
+
+# Then sign with your local keystore:
+$ANDROID_HOME/build-tools/35.0.0/apksigner sign \
+    --ks ~/.ans/release.jks \
+    --out ans-1.0.0.apk \
+    ans-1.0.0-aligned.apk
+
+adb install -r ans-1.0.0.apk
+```
+
+To cut a release:
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+# CI runs, creates the GitHub release (if missing), attaches the APK.
+```
+
 ## Layout
 
 | Path | Purpose |

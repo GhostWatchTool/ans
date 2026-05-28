@@ -4,6 +4,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Version string for the APK manifest. CI passes `-PansVersion=<tag without v>`
+// on tagged release builds so the APK's versionName matches the GitHub release;
+// local builds fall back to a development default.
+val ansVersion: String = (project.findProperty("ansVersion") as String?) ?: "1.0.0-dev"
+
 android {
     namespace = "dev.wntrmute.ans"
     compileSdk = 35
@@ -13,7 +18,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0"
+        versionName = ansVersion
     }
 
     buildTypes {

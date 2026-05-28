@@ -58,10 +58,20 @@ verification on a real radio — unit tests don't catch VOX-driven regressions.
 
 `dev.wntrmute.ans` — both `applicationId` and `namespace`.
 
+## Releases
+
+`.github/workflows/release.yml` triggers on `v*` tag push (or manual dispatch
+against an existing tag) and builds the **unsigned** release APK on
+ubuntu-latest, then attaches it to the GitHub release. The keystore stays off
+CI (matching the `kbc` repo's policy); the maintainer signs the artifact
+locally with `apksigner` before installing — see "Releases" in `README.md`.
+
+CI passes `-PansVersion=<tag without v>` to Gradle so the APK's `versionName`
+matches the tag. Local builds default to `1.0.0-dev` if the property isn't set.
+
 ## Not here yet
 
 - No settings UI for tuning lead-in / preamble / signoff text (the greeting
   and goodbye are hardcoded constants in `NumberStationPlayer.kt` — a text-box
   hook is expected later).
-- No release signing config; debug builds only.
-- No CI.
+- No in-repo signing config (matches kbc's stance — local signing only).

@@ -1,0 +1,75 @@
+name: Release APK
+
+# Builds the unsigned release APK on a v* tag push and attaches it to the
+# GitHub release. Signing is done locally — the keystore never enters CI,
+# matching the policy used in the kbc repo. The artifact is named
+# ans-<version>-release-unsigned.apk; sign it locally with apksigner before
+# installing or distributing (see README "Releases").
+#
+# Runs automatically on a v* tag push, or manually via "Run workflow" against
+# an existing tag.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach the APK to (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  android:
+    name: Unsigned release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag and version
+        id: vars
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.tag }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build unsigned release APK
+        run: ./gradlew :app:assembleRelease -PansVersion=${{ steps.vars.outputs.version }} --no-daemon
+
+      - name: Rename to a versioned name
+        id: artifact
+        run: |
+          src=$(ls app/build/outputs/apk/release/*-unsigned.apk | head -1)
+          out="ans-${{ steps.vars.outputs.version }}-release-unsigned.apk"
+          cp "$src" "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.vars.outputs.tag }}"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+                 --title "Number Station $tag" \
+                 --notes "Unsigned release APK. Sign locally with apksigner before installing." \
+                 --verify-tag
+          gh release upload "$tag" "${{ steps.artifact.outputs.path }}" \
+            --repo "$GITHUB_REPOSITORY" --clobber
