@@ -122,19 +122,14 @@ class NumberStationPlayer(private val context: Context) {
         }
 
         // Digits: each digit clip followed by an inter-digit silence; the
-        // last digit in each group uses the longer group-pause silence
-        // instead. After the final group, no trailing digit silence — the
-        // end-of-repeat tone runs next.
-        for ((gi, group) in groups.withIndex()) {
-            val lastGroup = gi == groups.lastIndex
+        // last digit in each group (including the final group) uses the
+        // longer group-pause silence so the cadence before the end-of-sequence
+        // tone matches the cadence between groups.
+        for (group in groups) {
             for ((di, digit) in group.withIndex()) {
                 val lastDigit = di == group.lastIndex
                 queue += Step.PlayClip(digitResId(digit))
-                queue += when {
-                    !lastDigit -> Step.Silence(INTER_DIGIT_MS)
-                    !lastGroup -> Step.Silence(GROUP_PAUSE_MS)
-                    else -> Step.Silence(0L) // no-op; tones follow immediately
-                }
+                queue += Step.Silence(if (lastDigit) GROUP_PAUSE_MS else INTER_DIGIT_MS)
             }
         }
 
