@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
  */
 class NumberStationViewModel(app: Application) : AndroidViewModel(app) {
 
-    var isPlaying by mutableStateOf(false)
+    var phase by mutableStateOf(Phase.Idle)
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
@@ -33,7 +33,7 @@ class NumberStationViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            PlaybackState.isPlaying.collect { isPlaying = it }
+            PlaybackState.phase.collect { phase = it }
         }
         viewModelScope.launch {
             PlaybackState.errors.collect { errorMessage = it }
@@ -48,24 +48,32 @@ class NumberStationViewModel(app: Application) : AndroidViewModel(app) {
         errorMessage = null
     }
 
-    /** Toggle playback. Reads the supplied message when starting. */
+    /**
+     * Single-tap dispatcher driven by the current [phase]:
+     *
+     * - **Idle**: start a broadcast of [message].
+     * - **Playing**: request a graceful stop (finish the current pass + signoff).
+     * - **Stopping**: hard-kill — terminate immediately.
+     */
     fun playOrStop(message: String) {
         val context = getApplication<Application>()
-        if (isPlaying) {
-            NumberStationService.stop(context)
-            return
+        when (phase) {
+            Phase.Idle -> {
+                val groups = NumberFormatter.groups(message)
+                if (groups.isEmpty()) return
+                // repeatCount is "times to repeat after the first read", so total
+                // passes is repeatCount + 1.
+                NumberStationService.play(
+                    context = context,
+                    groups = groups,
+                    repeat = repeatEnabled,
+                    loopForever = loopUntilStopped,
+                    plays = repeatCount + 1,
+                )
+            }
+            Phase.Playing -> NumberStationService.stop(context)
+            Phase.Stopping -> NumberStationService.stopNow(context)
         }
-        val groups = NumberFormatter.groups(message)
-        if (groups.isEmpty()) return
-        // repeatCount is "times to repeat after the first read", so total
-        // passes is repeatCount + 1.
-        NumberStationService.play(
-            context = context,
-            groups = groups,
-            repeat = repeatEnabled,
-            loopForever = loopUntilStopped,
-            plays = repeatCount + 1,
-        )
     }
 
     private companion object {

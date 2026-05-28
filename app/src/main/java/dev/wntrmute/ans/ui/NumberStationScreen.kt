@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.wntrmute.ans.NumberFormatter
 import dev.wntrmute.ans.NumberStationViewModel
+import dev.wntrmute.ans.Phase
 
 // Pre-seeded sample message — useful for testing without retyping. Survives
 // the rememberSaveable restore until the user edits the field; force-stopping
@@ -108,7 +109,7 @@ fun NumberStationScreen(viewModel: NumberStationViewModel = viewModel()) {
                     letterSpacing = 2.sp,
                 ),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                enabled = !viewModel.isPlaying,
+                enabled = viewModel.phase == Phase.Idle,
             )
 
             Text(
@@ -121,12 +122,20 @@ fun NumberStationScreen(viewModel: NumberStationViewModel = viewModel()) {
 
             Button(
                 onClick = { viewModel.playOrStop(field.text) },
-                enabled = viewModel.isPlaying || groups.isNotEmpty(),
+                // When idle the button is only useful with a non-empty
+                // message; in Playing or Stopping it must stay tappable so
+                // the user can actually end the broadcast.
+                enabled = viewModel.phase != Phase.Idle || groups.isNotEmpty(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
             ) {
-                Text(text = if (viewModel.isPlaying) "Stop" else "Play", fontSize = 18.sp)
+                val label = when (viewModel.phase) {
+                    Phase.Idle -> "Play"
+                    Phase.Playing -> "Stop"
+                    Phase.Stopping -> "Stop Now"
+                }
+                Text(text = label, fontSize = 18.sp)
             }
         }
     }
@@ -134,7 +143,7 @@ fun NumberStationScreen(viewModel: NumberStationViewModel = viewModel()) {
 
 @Composable
 private fun RepeatControls(viewModel: NumberStationViewModel) {
-    val enabled = !viewModel.isPlaying
+    val enabled = viewModel.phase == Phase.Idle
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),

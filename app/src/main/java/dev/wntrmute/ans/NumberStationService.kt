@@ -39,9 +39,10 @@ class NumberStationService : Service() {
             .build()
     }
 
-    // Permanent focus loss (a call, another app taking over) stops the broadcast.
+    // Permanent focus loss (a call, another app taking over) hard-stops the
+    // broadcast — no graceful signoff because the audio channel just got taken.
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        if (change == AudioManager.AUDIOFOCUS_LOSS) stopPlayback()
+        if (change == AudioManager.AUDIOFOCUS_LOSS) hardStopPlayback()
     }
 
     override fun onCreate() {
@@ -49,13 +50,13 @@ class NumberStationService : Service() {
         audioManager = getSystemService()!!
         player = NumberStationPlayer(this).apply {
             setAudioAttributes(audioAttributes)
-            onPlayingChanged = { playing ->
-                PlaybackState.setPlaying(playing)
-                if (!playing) stopPlayback() // natural end of a finite broadcast
+            onPhaseChanged = { phase ->
+                PlaybackState.setPhase(phase)
+                if (phase == Phase.Idle) teardownService()
             }
             onError = { message ->
                 PlaybackState.emitError(message)
-                stopPlayback()
+                hardStopPlayback()
             }
         }
     }
@@ -63,8 +64,9 @@ class NumberStationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_PLAY -> startPlayback(intent)
-            ACTION_STOP -> stopPlayback()
-            else -> stopPlayback()
+            ACTION_STOP -> player.requestStop()
+            ACTION_STOP_NOW -> hardStopPlayback()
+            else -> hardStopPlayback()
         }
         return START_NOT_STICKY
     }
@@ -76,12 +78,13 @@ class NumberStationService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
         val groups = intent.getStringArrayListExtra(EXTRA_GROUPS) ?: arrayListOf()
         if (groups.isEmpty()) {
-            stopPlayback()
+            hardStopPlayback()
             return
         }
         requestAudioFocus()
         acquireWakeLock()
-        PlaybackState.setPlaying(true)
+        // player.start() emits Phase.Playing through onPhaseChanged, which
+        // updates PlaybackState; no need to set it here.
         player.start(
             groups = groups,
             repeat = intent.getBooleanExtra(EXTRA_REPEAT, false),
@@ -90,13 +93,20 @@ class NumberStationService : Service() {
         )
     }
 
-    private fun stopPlayback() {
+    /** Stop the broadcast immediately (no signoff) and tear down the service. */
+    private fun hardStopPlayback() {
+        player.stopNow() // emits Phase.Idle, which routes back to teardownService()
+        // If the player was already idle, the callback won't fire; ensure
+        // teardown still happens so we don't leak the FGS / focus / wakelock.
+        teardownService()
+    }
+
+    /** Called when the player transitions to Phase.Idle (graceful or hard). */
+    private fun teardownService() {
         if (tornDown) return
         tornDown = true
-        player.stop()
         abandonAudioFocus()
         releaseWakeLock()
-        PlaybackState.setPlaying(false)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -198,6 +208,7 @@ class NumberStationService : Service() {
     companion object {
         private const val ACTION_PLAY = "dev.wntrmute.ans.action.PLAY"
         private const val ACTION_STOP = "dev.wntrmute.ans.action.STOP"
+        private const val ACTION_STOP_NOW = "dev.wntrmute.ans.action.STOP_NOW"
         private const val EXTRA_GROUPS = "groups"
         private const val EXTRA_REPEAT = "repeat"
         private const val EXTRA_LOOP = "loop"
@@ -226,10 +237,21 @@ class NumberStationService : Service() {
             ContextCompat.startForegroundService(context, intent)
         }
 
-        /** Stop the broadcast, if any. */
+        /**
+         * Request a graceful stop: finish the current pass, play the signoff,
+         * then end. If the player isn't running this is a no-op.
+         */
         fun stop(context: Context) {
             val intent = Intent(context, NumberStationService::class.java).apply {
                 action = ACTION_STOP
+            }
+            context.startService(intent)
+        }
+
+        /** Hard-stop the broadcast immediately, skipping any signoff. */
+        fun stopNow(context: Context) {
+            val intent = Intent(context, NumberStationService::class.java).apply {
+                action = ACTION_STOP_NOW
             }
             context.startService(intent)
         }

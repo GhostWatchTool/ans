@@ -26,12 +26,18 @@ import android.util.Log
  * The internal sequencer turns the per-pass plan into a flat list of [Step]s
  * (tone, silence, clip) and runs them one at a time on the main thread — tones
  * advance after their fixed duration; clips advance on `OnCompletionListener`.
- * A session id guards against callbacks from a flushed queue after [stop].
+ * A session id guards against callbacks from a flushed queue after [stopNow].
+ *
+ * Stopping has two flavours: [requestStop] signals a *graceful* end (finish
+ * the current pass, then play a signoff if one isn't already coming, then
+ * idle) and shifts the player to [Phase.Stopping]; [stopNow] is an immediate
+ * hard stop. The UI surfaces this as a button that flips from "Stop" to
+ * "Stop Now" when the first tap arrives.
  */
 class NumberStationPlayer(private val context: Context) {
 
-    /** Invoked on the main thread whenever playback starts or stops. */
-    var onPlayingChanged: ((Boolean) -> Unit)? = null
+    /** Invoked on the main thread whenever the playback phase changes. */
+    var onPhaseChanged: ((Phase) -> Unit)? = null
 
     /** Invoked on the main thread when audio cannot be played. */
     var onError: ((String) -> Unit)? = null
@@ -46,18 +52,31 @@ class NumberStationPlayer(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private val tonePlayer = TonePlayer()
 
-    private var playing = false
+    private var phase: Phase = Phase.Idle
     private var sessionId = 0
 
     private var groups: List<String> = emptyList()
     private var plan = RepeatPlan(repeat = false, loopForever = false, plays = 1)
     private var firstPass = true
 
+    // Set by requestStop(); enqueueSignoff() reacts on the next pass-end. Reset
+    // on every start() and on every hard stop.
+    private var stopRequested = false
+
+    // Tracks the just-completed pass, used to detect the "user requested stop,
+    // but the pass that finished already contained the natural signoff" case
+    // so we don't append a second one.
+    private var lastPassWasFinal = false
+
+    // True once the post-stopRequest signoff has been queued so the next
+    // pass-end transitions to Idle instead of injecting another signoff.
+    private var signoffInjected = false
+
     private val queue: ArrayDeque<Step> = ArrayDeque()
     private var currentClip: MediaPlayer? = null
     private var audioAttributes: AudioAttributes? = null
 
-    val isPlaying: Boolean get() = playing
+    val currentPhase: Phase get() = phase
 
     /** Route tones and audio clips through the given attributes (media stream). */
     fun setAudioAttributes(attributes: AudioAttributes) {
@@ -72,38 +91,80 @@ class NumberStationPlayer(private val context: Context) {
      */
     fun start(groups: List<String>, repeat: Boolean, loopForever: Boolean, plays: Int) {
         if (groups.isEmpty()) return
-        if (playing) stop()
+        if (phase != Phase.Idle) hardStop()
         this.groups = groups
         plan = RepeatPlan(repeat, loopForever, plays)
         firstPass = true
+        stopRequested = false
+        signoffInjected = false
+        lastPassWasFinal = false
         sessionId++
-        setPlaying(true)
+        setPhase(Phase.Playing)
         enqueuePass()
         runNext(sessionId)
     }
 
-    fun stop() {
-        if (!playing && queue.isEmpty()) return
+    /**
+     * Graceful stop: finish the current pass, then play the signoff (pre-bye
+     * tone + "Good bye for now") if the pass that's running didn't already
+     * include it, then end. Has no effect outside [Phase.Playing].
+     */
+    fun requestStop() {
+        if (phase != Phase.Playing) return
+        stopRequested = true
+        setPhase(Phase.Stopping)
+    }
+
+    /** Hard stop: immediate end, no signoff. Safe to call in any phase. */
+    fun stopNow() {
+        hardStop()
+    }
+
+    /** Release all resources. Safe to call from a service's `onDestroy`. */
+    fun shutdown() {
+        hardStop()
+    }
+
+    private fun hardStop() {
+        if (phase == Phase.Idle && queue.isEmpty()) return
         sessionId++ // invalidate in-flight callbacks
         queue.clear()
         tonePlayer.stop()
         releaseCurrentClip()
         main.removeCallbacksAndMessages(null)
-        setPlaying(false)
-    }
-
-    /** Release all resources. Safe to call from a service's `onDestroy`. */
-    fun shutdown() {
-        stop()
+        stopRequested = false
+        signoffInjected = false
+        setPhase(Phase.Idle)
     }
 
     private fun onPassComplete() {
-        if (!playing) return
+        if (phase == Phase.Idle) return
+
+        // The signoff we injected after a stop request just finished — done.
+        if (signoffInjected) {
+            setPhase(Phase.Idle)
+            return
+        }
+
+        if (stopRequested) {
+            // The pass that finished was the last (finite) one already, so it
+            // played its own signoff naturally — just end.
+            if (lastPassWasFinal) {
+                setPhase(Phase.Idle)
+                return
+            }
+            // Inject a signoff, then end after it finishes.
+            signoffInjected = true
+            enqueueSignoff()
+            runNext(sessionId)
+            return
+        }
+
         if (plan.completePass()) {
             enqueuePass()
             runNext(sessionId)
         } else {
-            setPlaying(false)
+            setPhase(Phase.Idle)
         }
     }
 
@@ -111,6 +172,7 @@ class NumberStationPlayer(private val context: Context) {
         val isLast = !plan.isInfinite && plan.remaining == 1
         val isFirst = firstPass
         firstPass = false
+        lastPassWasFinal = isLast
 
         // Lead-in: 800 Hz tone (keys VOX), brief gap inside VOX hang, then
         // the greeting clip on the very first pass only.
@@ -147,8 +209,21 @@ class NumberStationPlayer(private val context: Context) {
         queue += Step.PassEnd
     }
 
+    /**
+     * Queue a signoff-only sequence (pre-bye tone + gap + goodbye + tail) for
+     * use when a graceful stop is requested mid-broadcast and the pass that
+     * just ended did *not* include its own signoff.
+     */
+    private fun enqueueSignoff() {
+        queue += Step.PlayTone(END_HZ, BYE_LEAD_TONE_MS)
+        queue += Step.Silence(BYE_LEAD_GAP_MS)
+        queue += Step.PlayClip(lookupResId(GOODBYE_NAME))
+        queue += Step.Silence(BYE_TAIL_MS)
+        queue += Step.PassEnd
+    }
+
     private fun runNext(session: Int) {
-        if (session != sessionId || !playing) return
+        if (session != sessionId || phase == Phase.Idle) return
         val step = queue.removeFirstOrNull() ?: run {
             // Queue ran dry without a PassEnd marker — treat as a pass end so
             // the repeat plan can stop or kick off the next pass.
@@ -175,7 +250,7 @@ class NumberStationPlayer(private val context: Context) {
     private fun playClip(rawResId: Int, session: Int) {
         if (rawResId == 0) {
             main.post { onError?.invoke("Missing audio resource for the ${voice.label} voice.") }
-            setPlaying(false)
+            hardStop()
             return
         }
         val mp = MediaPlayer()
@@ -189,7 +264,7 @@ class NumberStationPlayer(private val context: Context) {
             Log.w(TAG, "Failed to prepare clip resId=$rawResId", e)
             safeRelease(mp)
             main.post { onError?.invoke("Failed to play audio clip.") }
-            setPlaying(false)
+            hardStop()
             return
         }
         currentClip = mp
@@ -203,7 +278,7 @@ class NumberStationPlayer(private val context: Context) {
             if (currentClip === player) currentClip = null
             safeRelease(player)
             main.post { onError?.invoke("Audio playback error.") }
-            setPlaying(false)
+            hardStop()
             true
         }
         mp.start()
@@ -225,10 +300,10 @@ class NumberStationPlayer(private val context: Context) {
         }
     }
 
-    private fun setPlaying(value: Boolean) {
-        if (playing == value) return
-        playing = value
-        main.post { onPlayingChanged?.invoke(value) }
+    private fun setPhase(value: Phase) {
+        if (phase == value) return
+        phase = value
+        main.post { onPhaseChanged?.invoke(value) }
     }
 
     // --- Resource resolution ---
