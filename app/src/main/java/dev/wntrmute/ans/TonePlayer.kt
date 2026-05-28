@@ -118,7 +118,11 @@ class TonePlayer {
         const val TAG = "TonePlayer"
         const val SAMPLE_RATE = 22050
         const val BYTES_PER_SAMPLE = 2 // PCM 16-bit mono
-        const val AMPLITUDE = 0.5 // -6 dBFS — loud enough to key VOX, well clear of clipping
+        // -12 dBFS. A pure sine at the same peak level as speech sounds much
+        // louder than speech because all its energy is at one frequency, so
+        // half the amplitude (~half of the speech's peaks) is needed to keep
+        // the tone underneath the greeting/signoff voice rather than over it.
+        const val AMPLITUDE = 0.25
         const val ENVELOPE_MS = 10 // attack/release to avoid clicks
         const val RELEASE_GUARD_MS = 100L
     }

@@ -12,13 +12,14 @@ import java.util.Locale
 /**
  * Speaks number-station messages through the system text-to-speech engine.
  *
- * A *pass* is one complete reading of the message. Each pass begins with an
- * 800 Hz tone played behind a time-of-day greeting ("Good morning" / etc.) so
- * a VOX-enabled radio is keyed before any content arrives. Digits are then
- * spoken one at a time with a short pause between five-digit groups. Between
- * repeats, a short 800 Hz tone marks the end of the repeat. After the final
- * pass in a finite broadcast, an 800 Hz tone plays behind "Good bye for now"
- * to sign off. Loop-until-stopped mode has no signoff (the user terminates).
+ * Every pass opens with an 800 Hz tone to key a VOX-enabled radio. The first
+ * pass also speaks a time-of-day greeting ("Good morning" / etc.) after that
+ * tone; subsequent repeats omit the greeting and jump straight to digits.
+ * Digits are spoken one at a time with a short pause between five-digit
+ * groups. Between repeats, a 432 Hz tone marks the end of the repeat. After
+ * the final pass in a finite broadcast, a 432 Hz tone plays just before
+ * "Good bye for now" as a signoff. Loop-until-stopped mode has no signoff
+ * (the user terminates).
  *
  * TTS delivers progress callbacks on a binder thread; anything that touches
  * state or invokes listeners is marshalled to the main thread via [main].
@@ -48,6 +49,10 @@ class NumberStationPlayer(context: Context) {
     private var pendingPlay: (() -> Unit)? = null
     private var audioAttributes: AudioAttributes? = null
 
+    // Tracks the first pass of a broadcast so the spoken greeting fires once
+    // at the head and is omitted from subsequent repeats.
+    private var firstPass = true
+
     private val progressListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {
             val parts = utteranceId?.split(':') ?: return
@@ -55,11 +60,13 @@ class NumberStationPlayer(context: Context) {
             val session = parts[0].toIntOrNull() ?: return
             if (session != sessionId) return
             when (parts[1]) {
-                LEAD_TAG -> tonePlayer.play(TONE_HZ, LEAD_TONE_MS)
-                BYE_TAG -> tonePlayer.play(TONE_HZ, FINAL_TONE_MS)
-                END_MARKER -> tonePlayer.play(TONE_HZ, END_TONE_MS)
-                // END_LAST_MARKER intentionally fires no tone — the BYE_TAG
-                // utterance just before it already played the final tone.
+                LEAD_TONE_TAG -> tonePlayer.play(LEAD_HZ, LEAD_TONE_MS)
+                END_MARKER -> tonePlayer.play(END_HZ, END_TONE_MS)
+                END_TONE_TAG -> tonePlayer.play(END_HZ, BYE_LEAD_TONE_MS)
+                // LEAD_TAG (greeting voice) and BYE_TAG (signoff voice) no
+                // longer fire tones — the tone now plays before the voice via
+                // a dedicated silent-utterance trigger. END_LAST_MARKER fires
+                // no tone either; END_TONE_TAG just before it already did.
             }
         }
 
@@ -116,6 +123,7 @@ class NumberStationPlayer(context: Context) {
         if (groups.isEmpty()) return
         this.groups = groups
         plan = RepeatPlan(repeat, loopForever, plays)
+        firstPass = true
         val run = {
             sessionId++
             setPlaying(true)
@@ -152,13 +160,18 @@ class NumberStationPlayer(context: Context) {
         // Last pass when exactly one finite reading remains. Infinite plans
         // never set this, so loop-until-stopped mode skips the signoff.
         val isLast = !plan.isInfinite && plan.remaining == 1
+        val isFirst = firstPass
+        firstPass = false
 
-        // Lead-in: greeting voice with a tone behind it (tone is triggered by
-        // the greeting utterance's onStart, plays concurrently via AudioTrack).
-        // The following silent utterance gives the tone tail time to fade
-        // before digits begin.
-        tts.speak(currentGreeting(), TextToSpeech.QUEUE_FLUSH, null, "$session:$LEAD_TAG")
-        tts.playSilentUtterance(LEAD_SILENCE_MS, TextToSpeech.QUEUE_ADD, "$session:leadSilence")
+        // Lead-in: 800 Hz tone always (keys VOX for this pass), then a brief
+        // gap inside VOX hang. The spoken greeting fires only on the first
+        // pass of the broadcast; subsequent repeats jump straight to digits.
+        tts.playSilentUtterance(LEAD_TONE_MS.toLong(), TextToSpeech.QUEUE_FLUSH, "$session:$LEAD_TONE_TAG")
+        tts.playSilentUtterance(LEAD_TONE_GAP_MS, TextToSpeech.QUEUE_ADD, "$session:leadGap")
+        if (isFirst) {
+            tts.speak(currentGreeting(), TextToSpeech.QUEUE_ADD, null, "$session:$LEAD_TAG")
+            tts.playSilentUtterance(LEAD_SILENCE_MS, TextToSpeech.QUEUE_ADD, "$session:leadSilence")
+        }
 
         // Digits.
         groups.forEachIndexed { i, group ->
@@ -170,12 +183,14 @@ class NumberStationPlayer(context: Context) {
         }
 
         if (isLast) {
-            // Final pass: tone behind the signoff voice, then a short silent
-            // marker whose onDone drives passComplete -> stop.
+            // Final pass: 432 Hz end tone, brief gap, then the signoff voice,
+            // then a short silent marker whose onDone drives passComplete ->
+            // stop.
+            tts.playSilentUtterance(END_TONE_AND_GAP_MS, TextToSpeech.QUEUE_ADD, "$session:$END_TONE_TAG")
             tts.speak(GOODBYE_TEXT, TextToSpeech.QUEUE_ADD, null, "$session:$BYE_TAG")
             tts.playSilentUtterance(BYE_TAIL_MS, TextToSpeech.QUEUE_ADD, "$session:$END_LAST_MARKER")
         } else {
-            // Non-final pass: a silent utterance whose onStart fires the
+            // Non-final pass: silent utterance whose onStart fires the 432 Hz
             // end-of-repeat tone, and whose onDone drives the next pass. Its
             // duration covers the tone plus a brief inter-pass pause.
             tts.playSilentUtterance(END_TONE_AND_PAUSE_MS, TextToSpeech.QUEUE_ADD, "$session:$END_MARKER")
@@ -215,28 +230,40 @@ class NumberStationPlayer(context: Context) {
         const val TAG = "NumberStationPlayer"
         const val SPEECH_RATE = 0.9f
 
-        // Lead-in: tone behind greeting, then short silence before digits.
+        // Lead-in: 800 Hz tone, brief gap (kept inside typical VOX hang so the
+        // radio stays keyed), then the greeting voice, then a short pause
+        // before digits. Tone is shorter than the previous behind-voice
+        // version because it stands alone now — just enough to key VOX.
+        const val LEAD_TONE_TAG = "leadTone"
         const val LEAD_TAG = "lead"
-        const val LEAD_TONE_MS = 1500
-        const val LEAD_SILENCE_MS = 700L
+        const val LEAD_HZ = 800
+        const val LEAD_TONE_MS = 700
+        const val LEAD_TONE_GAP_MS = 200L
+        const val LEAD_SILENCE_MS = 400L
 
         // Inter-group spacing inside a pass.
         const val GROUP_PAUSE_MS = 700L
 
-        // Non-final pass end: silent utterance with end-of-repeat tone on its
-        // onStart. Duration covers the tone (500 ms) plus an inter-pass pause
-        // (800 ms) — the next pass's lead-in tone re-keys VOX.
+        // End-of-repeat: 432 Hz tone. For non-final passes the tone-and-pause
+        // silent doubles as the pass-complete marker; for the final pass the
+        // tone plays via a separate trigger right before the signoff voice.
+        // The pre-goodbye tone is 200 ms longer than the between-repeats tone
+        // so VOX is solidly keyed before the signoff voice arrives (the
+        // signoff was getting clipped at 500 ms).
+        const val END_HZ = 432
         const val END_TONE_MS = 500
-        const val END_TONE_AND_PAUSE_MS = 1300L
+        const val END_TONE_AND_PAUSE_MS = 1000L
+        const val BYE_LEAD_TONE_MS = 700
+        const val END_TONE_AND_GAP_MS = 900L
         const val END_MARKER = "end"
+        const val END_TONE_TAG = "endTone"
 
-        // Final pass: tone behind signoff voice, then a short silent marker.
+        // Signoff (final pass only): voice, then a short silent marker whose
+        // onDone drives passComplete -> stop.
         const val BYE_TAG = "bye"
-        const val FINAL_TONE_MS = 1500
         const val BYE_TAIL_MS = 500L
         const val END_LAST_MARKER = "endLast"
 
-        const val TONE_HZ = 800
         const val GOODBYE_TEXT = "Good bye for now"
 
         // Known Google en-GB female voice ids, preferred when available. The
